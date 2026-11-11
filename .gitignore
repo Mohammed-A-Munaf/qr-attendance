@@ -1,0 +1,10 @@
+node_modules/
+
+# Attendance records and the signing secret - never commit
+data/
+
+# Large third-party binary - download separately (see README)
+bin/cloudflared.exe
+
+.claude/
+*.log

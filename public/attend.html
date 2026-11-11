@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; min-height: 100dvh; background: #f3f4f1; color: #1b1f1d;
+    font: 17px/1.45 system-ui, "Segoe UI", sans-serif; display: grid; place-items: center; padding: 16px; }
+  main { width: 100%; max-width: 420px; background: #fff; border: 1px solid #dfe2dc;
+    border-radius: 16px; padding: 24px 20px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 4px; overflow-wrap: anywhere; }
+  p { margin: 8px 0; color: #68706b; }
+  label { display: block; text-align: start; font-weight: 600; margin: 20px 0 6px; }
+  input { width: 100%; font: inherit; font-size: 18px; padding: 14px 12px; border: 1px solid #b9beb6;
+    border-radius: 10px; }
+  input:focus { outline: 3px solid #bfdccd; border-color: #0f6b4f; }
+  button { width: 100%; margin-top: 14px; font: inherit; font-weight: 600; font-size: 18px;
+    padding: 14px; border: 0; border-radius: 10px; background: #0f6b4f; color: #fff; }
+  button:disabled { opacity: .6; }
+  .error { color: #b3261e; min-height: 1.4em; margin: 10px 0 0; }
+  .mark { width: 84px; height: 84px; border-radius: 50%; margin: 4px auto 14px; display: grid;
+    place-items: center; font-size: 44px; color: #fff; }
+  .ok .mark { background: #0f6b4f; }
+  .stop .mark { background: #b3261e; }
+  .name { font-size: 20px; font-weight: 600; color: #1b1f1d; overflow-wrap: anywhere; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div id="loading"><p>Loading…</p></div>
+
+  <form id="form" hidden>
+    <h1 id="subject" dir="auto"></h1>
+    <p>Register your attendance</p>
+    <label for="name">Your full name</label>
+    <input id="name" name="name" autocomplete="name" maxlength="80" dir="auto" required>
+    <p class="error" id="formError"></p>
+    <button id="submit">I am here</button>
+    <p style="font-size:14px">You can register one name only from this phone.</p>
+    <p style="font-size:14px" id="locNote" hidden>Your phone will ask for your location. Please allow it: it is checked once, to confirm you are in class.</p>
+  </form>
+
+  <div id="done" class="ok" hidden>
+    <div class="mark">✓</div>
+    <h1>Attendance registered</h1>
+    <p class="name" id="doneName" dir="auto"></p>
+    <p id="doneInfo" dir="auto"></p>
+  </div>
+
+  <div id="stop" class="stop" hidden>
+    <div class="mark">!</div>
+    <h1 id="stopTitle"></h1>
+    <p id="stopText" dir="auto"></p>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let ticket = null;
+let askLocation = false;
+
+// One location reading, or null if the student refuses or the phone cannot tell.
+function getLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
+}
+
+// A short description of this phone; the teacher is warned if two entries look like one phone.
+function describePhone() {
+  const s = window.screen || {};
+  return [s.width, s.height, s.colorDepth, window.devicePixelRatio, navigator.hardwareConcurrency,
+    navigator.maxTouchPoints, navigator.platform, (navigator.languages || []).join(','),
+    Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+}
+
+function show(id) {
+  for (const part of ['loading', 'form', 'done', 'stop']) $(part).hidden = part !== id;
+}
+function stop(title, text) {
+  $('stopTitle').textContent = title;
+  $('stopText').textContent = text;
+  show('stop');
+}
+function done(name, subject, time) {
+  $('doneName').textContent = name;
+  $('doneInfo').textContent = subject + (time ? ' · ' + new Date(time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '');
+  show('done');
+}
+function explain(data) {
+  if (data.error === 'closed') return stop('Attendance is closed', 'There is no attendance session open right now.');
+  if (data.error === 'paused') return stop('Registration is paused', 'Your teacher has closed registration for now. Scan the QR code again when it is back on the screen.');
+  if (data.error === 'expired') return stop('Code not valid', 'Please scan the QR code on the screen again.');
+  if (data.error === 'device') return stop('Already registered', 'This phone already registered "' + data.name + '". One phone can register one student only.');
+  if (data.error === 'duplicate') return stop('Name already registered', 'This name is already on the attendance list. If that was not you, tell your teacher.');
+  stop('Something went wrong', 'Please scan the QR code again.');
+}
+
+// Classroom Wi-Fi mode: the form disappears as soon as the teacher closes the QR code.
+let watch = null;
+async function checkStillOpen() {
+  if ($('form').hidden) return clearInterval(watch);
+  try {
+    const { state } = await (await fetch('/api/open')).json();
+    if (state === 'open' || $('form').hidden) return;
+    clearInterval(watch);
+    explain({ error: state });
+  } catch { /* brief connection drop: keep the form */ }
+}
+
+async function start() {
+  try {
+    const token = new URLSearchParams(location.search).get('t') || '';
+    const res = await fetch('/api/ticket?t=' + encodeURIComponent(token));
+    const data = await res.json();
+    if (data.already) return done(data.name, data.subject);
+    if (!res.ok) return explain(data);
+    ticket = data.ticket;
+    askLocation = !!data.askLocation;
+    $('locNote').hidden = !askLocation;
+    $('subject').textContent = data.subject;
+    show('form');
+    $('name').focus();
+    if (!askLocation) watch = setInterval(checkStillOpen, 2500);
+  } catch {
+    stop('No connection', 'Check your connection, then scan the QR code again.');
+  }
+}
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('formError').textContent = '';
+  $('submit').disabled = true;
+  try {
+    const body = { ticket, name: $('name').value };
+    if (askLocation) {
+      $('submit').textContent = 'Checking location…';
+      body.loc = await getLocation();
+      body.fp = describePhone();
+    }
+    const res = await fetch('/api/attend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.ok) return done(data.name, data.subject, data.time);
+    if (data.error === 'name') { $('formError').textContent = data.message; return; }
+    explain(data);
+  } catch {
+    $('formError').textContent = 'No connection. Check your connection and try again.';
+  } finally {
+    $('submit').textContent = 'I am here';
+    $('submit').disabled = false;
+  }
+};
+
+start();
+</script>
+</body>
+</html>

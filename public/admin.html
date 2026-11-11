@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QR Attendance</title>
+<style>
+  :root {
+    --bg: #f3f4f1; --card: #ffffff; --ink: #1b1f1d; --muted: #68706b; --line: #dfe2dc;
+    --accent: #0f6b4f; --accent-ink: #ffffff; --soft: #e6f2ec; --danger: #b3261e; --warn: #fff4d6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px;
+    background: var(--card); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  #status { margin-left: auto; padding: 4px 12px; border-radius: 99px; font-size: 13px;
+    background: #ecedea; color: var(--muted); }
+  #status.live { background: var(--soft); color: var(--accent); font-weight: 600; }
+  main { display: grid; grid-template-columns: 300px minmax(320px, 1fr) minmax(320px, 1fr);
+    gap: 16px; padding: 16px 24px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  section + section { margin-top: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 0 0 12px; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); padding: 8px 12px; }
+  button:hover { border-color: #b9beb6; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+    font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger { color: var(--danger); }
+  button.small { padding: 3px 8px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text], input[type=password], input[type=search], select { font: inherit; padding: 8px 10px; width: 100%;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+  .row { display: flex; gap: 8px; }
+  .row > input { flex: 1; min-width: 0; }
+  label.field { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  #subjects { list-style: none; padding: 0; margin: 12px 0 0; }
+  #subjects li { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+    border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+  #subjects li:hover { background: #f4f5f2; }
+  #subjects li.picked { background: var(--soft); border-color: #bfdccd; font-weight: 600; }
+  #subjects li span { flex: 1; overflow-wrap: anywhere; }
+
+  #qrBox { width: min(100%, 380px); aspect-ratio: 1; margin: 0 auto; display: grid;
+    place-items: center; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted);
+    text-align: center; padding: 12px; }
+  #qrBox.on { border-style: solid; padding: 0; }
+  #qrBox svg { width: 100%; height: 100%; display: block; }
+  .qrActions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  #netNote { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+  #netNote.warn { background: var(--warn); color: var(--ink); border-radius: 8px; padding: 8px 10px; }
+  #screenNote { background: var(--warn); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+
+  .count { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .count b { font-size: 44px; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600;
+    border-bottom: 1px solid var(--line); padding: 6px; }
+  td { padding: 7px 6px; border-bottom: 1px solid #eef0ec; vertical-align: middle; }
+  td.num, td.time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.act { text-align: right; white-space: nowrap; }
+  .scroll { max-height: 420px; overflow: auto; }
+  .tag { font-size: 11px; background: #ecedea; color: var(--muted); border-radius: 4px; padding: 1px 5px; }
+  .warn { font-size: 12px; color: #8a5300; }
+  #blocked { margin: 12px 0 0; padding: 10px 12px 10px 28px; background: var(--warn);
+    border-radius: 8px; font-size: 13px; }
+  #blocked:empty { display: none; }
+
+  dialog { border: 1px solid var(--line); border-radius: 12px; padding: 20px; width: min(560px, 92vw); }
+  dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1b1f1d;
+    color: #fff; padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>QR Attendance</h1>
+  <span class="muted" id="address"></span>
+  <span id="status">No session running</span>
+</header>
+
+<main>
+  <!-- column 1: subjects and settings -->
+  <div>
+    <section>
+      <h2>Subjects</h2>
+      <form class="row" id="subjectForm">
+        <input type="text" id="subjectName" placeholder="New subject name" maxlength="80" dir="auto">
+        <button>Add</button>
+      </form>
+      <ul id="subjects"></ul>
+      <p class="muted" id="noSubjects">Add your first subject, then select it to start.</p>
+      <div class="qrActions">
+        <button class="primary" id="startBtn" disabled>Start attendance</button>
+        <button class="danger" id="endBtn" hidden>End session</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Network</h2>
+      <label class="field" for="mode" style="margin-top:0">How students connect</label>
+      <select id="mode">
+        <option value="local">Classroom Wi-Fi (local, most secure)</option>
+        <option value="online">Internet (students' mobile data)</option>
+      </select>
+      <p class="muted" id="modeNote"></p>
+      <label class="field" for="lanIp">Address the students' phones use</label>
+      <select id="lanIp"></select>
+      <label class="field" for="wifiSsid">Wi-Fi name (optional, shows a "join Wi-Fi" QR)</label>
+      <input type="text" id="wifiSsid" maxlength="64">
+      <label class="field" for="wifiPass">Wi-Fi password</label>
+      <input type="text" id="wifiPass" maxlength="64">
+      <label style="display:flex; gap:8px; margin-top:14px; align-items:flex-start">
+        <input type="checkbox" id="deviceLock">
+        <span>One name per phone <span class="muted">(recommended)</span></span>
+      </label>
+      <div class="qrActions"><button id="saveSettings">Save</button></div>
+    </section>
+  </div>
+
+  <!-- column 2: QR code -->
+  <div>
+    <section>
+      <h2 id="qrTitle">QR code</h2>
+      <div id="qrBox">Select a subject and press "Start attendance".</div>
+      <p class="muted" style="text-align:center" id="qrHint">&nbsp;</p>
+      <p id="netNote" hidden></p>
+      <div class="qrActions">
+        <button class="primary" id="displayBtn">Send QR to second monitor</button>
+        <button class="danger" id="closeQrBtn" hidden>Close QR (pause registration)</button>
+        <div id="screenNote" hidden></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- column 3: live list + history -->
+  <div>
+    <section>
+      <h2>Attending now</h2>
+      <div class="count"><b id="count">0</b><span class="muted">students checked in. Compare with a head count.</span></div>
+      <form class="row" id="manualForm">
+        <input type="text" id="manualName" placeholder="Add a student by hand" maxlength="80" dir="auto">
+        <button>Add</button>
+      </form>
+      <ol id="blocked"></ol>
+      <input type="search" id="search" placeholder="Search a name to check if it is registered" maxlength="80" dir="auto" style="margin-top:12px">
+      <p class="muted" id="searchInfo" style="margin:6px 0 0" hidden></p>
+      <div class="scroll" style="margin-top:8px">
+        <table>
+          <thead><tr><th>#</th><th>Full name</th><th>Time</th><th></th></tr></thead>
+          <tbody id="records"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>History</h2>
+      <div class="qrActions" style="margin:0 0 10px"><button id="exportAll">Download everything (Excel / CSV)</button></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Subject</th><th>Date</th><th>Count</th><th></th></tr></thead>
+          <tbody id="history"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<dialog id="viewer">
+  <h2 id="viewerTitle"></h2>
+  <input type="search" id="viewerSearch" placeholder="Search a name" maxlength="80" dir="auto">
+  <p class="muted" id="viewerSearchInfo" style="margin:6px 0" hidden></p>
+  <div class="scroll">
+    <table><thead><tr><th>#</th><th>Full name</th><th>Time</th></tr></thead><tbody id="viewerRows"></tbody></table>
+  </div>
+  <div class="row" style="margin-top:14px; justify-content:flex-end">
+    <button id="viewerCsv">Download CSV</button>
+    <button id="viewerClose">Close</button>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let pickedSubject = localStorage.getItem('pickedSubject') || '';
+let settingsLoaded = false;
+let historyKey = '';
+
+function toast(msg) {
+  $('toast').textContent = msg;
+  $('toast').classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => $('toast').classList.remove('show'), 3500);
+}
+
+async function api(path, method = 'GET', body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || 'Request failed');
+  return data;
+}
+
+const run = (fn) => async (e) => {
+  if (e && e.preventDefault) e.preventDefault();
+  try { await fn(e); await refresh(); } catch (err) { toast(err.message); }
+};
+
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDate = (iso) => new Date(iso).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) +
+  ' ' + new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+// ---------- drawing ----------
+function drawSubjects() {
+  const list = $('subjects');
+  list.replaceChildren();
+  if (!state.subjects.some((s) => s.id === pickedSubject)) pickedSubject = '';
+  for (const s of state.subjects) {
+    const csv = el('button', { className: 'small', textContent: 'CSV', title: 'Download all attendance for this subject' });
+    csv.onclick = (e) => { e.stopPropagation(); location.href = '/api/export?subject=' + s.id; };
+    const del = el('button', { className: 'small danger', textContent: '✕', title: 'Remove subject' });
+    del.onclick = (e) => {
+      e.stopPropagation();
+      if (confirm(`Remove "${s.name}" from the list? Its past attendance stays in History.`)) {
+        run(() => api('/api/subjects/' + s.id, 'DELETE'))();
+      }
+    };
+    const li = el('li', { className: s.id === pickedSubject ? 'picked' : '' }, el('span', { textContent: s.name, dir: 'auto' }), csv, del);
+    li.onclick = () => { pickedSubject = s.id; localStorage.setItem('pickedSubject', s.id); drawSubjects(); };
+    list.append(li);
+  }
+  $('noSubjects').hidden = state.subjects.length > 0;
+  $('startBtn').disabled = !pickedSubject;
+  const picked = state.subjects.find((s) => s.id === pickedSubject);
+  $('startBtn').textContent = picked ? `Start attendance: ${picked.name}` : 'Start attendance';
+  $('endBtn').hidden = !state.active;
+}
+
+// Same matching the app uses for duplicates: ignores capitals, extra spaces and Arabic spelling variants.
+function nameKey(name) {
+  return String(name).normalize('NFKC').toLowerCase()
+    .replace(/[ً-ٰٟـ]/g, '')
+    .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+    .replace(/[^\p{L} ]/gu, '').replace(/\s+/g, ' ').trim();
+}
+
+// Keeps the records whose name contains every word typed, and fills in the "found / not found" line.
+function searchRecords(records, query, info) {
+  const words = nameKey(query).split(' ').filter(Boolean);
+  const numbered = records.map((r, i) => ({ ...r, number: i + 1 }));
+  if (!words.length) { info.hidden = true; return numbered; }
+  // each typed word must be the start of one of the name's words ("ali" finds Ali, not Khalid)
+  const found = numbered.filter((r) => {
+    const parts = nameKey(r.name).split(' ');
+    return words.every((w) => parts.some((part) => part.startsWith(w)));
+  });
+  info.hidden = false;
+  info.textContent = found.length
+    ? `${found.length} of ${records.length} match`
+    : 'Not registered: no name in this list matches.';
+  info.style.color = found.length ? '' : 'var(--danger)';
+  return found;
+}
+
+function drawRecords() {
+  $('count').textContent = state.records.length;
+  const rows = searchRecords(state.records, $('search').value, $('searchInfo')).map((r) => {
+    const i = r.number - 1;
+    const del = el('button', { className: 'small danger', textContent: 'Remove' });
+    del.onclick = () => {
+      if (confirm(`Remove ${r.name} from the list?`)) run(() => api('/api/records/' + r.id, 'DELETE'))();
+    };
+    const name = el('td', { dir: 'auto' }, r.name);
+    if (r.source === 'manual') name.append(' ', el('span', { className: 'tag', textContent: 'by hand' }));
+    for (const w of r.warnings || []) name.append(el('div', { className: 'warn', textContent: '⚠ ' + w }));
+    return el('tr', {}, el('td', { className: 'num', textContent: i + 1 }), name,
+      el('td', { className: 'time', textContent: fmtTime(r.time) }), el('td', { className: 'act' }, del));
+  });
+  $('records').replaceChildren(...rows.reverse());
+
+  $('blocked').replaceChildren(...state.blocked.map((b) => el('li', {
+    dir: 'auto',
+    textContent: b.reason === 'device'
+      ? `Blocked: the phone of "${b.ownerName}" tried to also register "${b.name}" (${fmtTime(b.time)})`
+      : `Blocked: "${b.name}" was entered a second time from another phone (${fmtTime(b.time)})`,
+  })));
+}
+
+function drawHeader() {
+  const live = !!state.active;
+  $('status').className = live ? 'live' : '';
+  $('status').textContent = !live ? 'No session running'
+    : state.paused ? `Paused: ${state.active.subjectName}` : `Live: ${state.active.subjectName}`;
+  $('displayBtn').textContent = live && state.paused ? 'Open QR on second monitor' : 'Send QR to second monitor';
+  $('closeQrBtn').hidden = !(live && state.active.mode !== 'online' && !state.paused);
+  const online = live ? state.active.mode === 'online' : state.settings.mode === 'online';
+  $('netNote').hidden = online;
+  $('netNote').className = state.networkAdvice.warn ? 'warn' : '';
+  $('netNote').textContent = state.networkAdvice.text;
+  if (!online) $('address').textContent = `Classroom Wi-Fi mode · students connect to http://${state.lanIp}:${state.port}`;
+  else if (!live) $('address').textContent = 'Internet mode · the public address is created when you start a session';
+  else if (state.tunnel.status === 'on') $('address').textContent = `Internet mode · ${state.tunnel.url}`;
+  else $('address').textContent = 'Internet mode · ' + (state.tunnel.error || 'connecting…');
+  $('qrTitle').textContent = live ? `QR code: ${state.active.subjectName}` : 'QR code';
+}
+
+function drawSettings() {
+  if (settingsLoaded) return; // do not overwrite what the teacher is typing
+  settingsLoaded = true;
+  $('mode').value = state.settings.mode;
+  $('mode').options[1].disabled = !state.onlineAvailable;
+  drawModeNote();
+  $('lanIp').replaceChildren(...state.interfaces.map((i) =>
+    el('option', { value: i.address, textContent: `${i.address}  (${i.name})`, selected: i.address === state.lanIp })));
+  if (!state.interfaces.length) $('lanIp').append(el('option', { textContent: 'No network found', value: '' }));
+  $('wifiSsid').value = state.settings.wifiSsid;
+  $('wifiPass').value = state.settings.wifiPass;
+  $('deviceLock').checked = state.settings.deviceLock;
+}
+
+function drawModeNote() {
+  $('modeNote').textContent = $('mode').value === 'online'
+    ? 'This computer needs internet. The code changes every 15 seconds, students are asked for their location, and anyone far from the class is marked with a warning. Applies from the next session you start.'
+    : 'Students join the same Wi-Fi as this computer. No internet is used.';
+}
+
+async function drawHistory() {
+  const key = (state.active ? state.active.id : '') + ':' + state.records.length;
+  if (key === historyKey) return;
+  historyKey = key;
+  const { sessions } = await api('/api/sessions');
+  $('history').replaceChildren(...sessions.map((s) => {
+    const view = el('button', { className: 'small', textContent: 'View' });
+    view.onclick = () => openViewer(s.id);
+    const csv = el('button', { className: 'small', textContent: 'CSV' });
+    csv.onclick = () => { location.href = '/api/export?session=' + s.id; };
+    const del = el('button', { className: 'small danger', textContent: '✕', title: 'Delete this session' });
+    del.onclick = () => {
+      if (confirm(`Permanently delete the ${s.subjectName} session of ${fmtDate(s.startedAt)} and its ${s.count} names? This cannot be undone.`)) {
+        historyKey = '';
+        run(() => api('/api/sessions/' + s.id, 'DELETE'))();
+      }
+    };
+    const subject = el('td', { dir: 'auto' }, s.subjectName);
+    if (!s.endedAt) subject.append(' ', el('span', { className: 'tag', textContent: 'live' }));
+    return el('tr', {}, subject, el('td', { className: 'time', textContent: fmtDate(s.startedAt) }),
+      el('td', { className: 'num', textContent: s.count }), el('td', { className: 'act' }, view, ' ', csv, ' ', del));
+  }));
+}
+
+let viewerRecords = [];
+function drawViewer() {
+  const list = searchRecords(viewerRecords, $('viewerSearch').value, $('viewerSearchInfo'));
+  $('viewerRows').replaceChildren(...list.map((r) => el('tr', {},
+    el('td', { className: 'num', textContent: r.number }),
+    el('td', { dir: 'auto' }, r.name, ...(r.warnings || []).map((w) => el('div', { className: 'warn', textContent: '⚠ ' + w }))),
+    el('td', { className: 'time', textContent: fmtTime(r.time) }))));
+}
+
+async function openViewer(id) {
+  try {
+    const { session, records } = await api('/api/sessions/' + id);
+    $('viewerTitle').textContent = `${session.subjectName} · ${fmtDate(session.startedAt)} · ${records.length} students`;
+    viewerRecords = records;
+    $('viewerSearch').value = '';
+    drawViewer();
+    $('viewerCsv').onclick = () => { location.href = '/api/export?session=' + id; };
+    $('viewer').showModal();
+  } catch (err) { toast(err.message); }
+}
+
+async function refresh() {
+  state = await api('/api/state');
+  drawHeader(); drawSubjects(); drawRecords(); drawSettings();
+  await drawHistory();
+}
+
+async function refreshQr() {
+  try {
+    const qr = await api('/api/qr');
+    const box = $('qrBox');
+    if (qr.active && (qr.waiting || qr.paused)) {
+      box.className = '';
+      box.textContent = qr.waiting || 'Registration is paused because the QR window is closed. Press the button below to open it and let students register.';
+      $('qrHint').innerHTML = '&nbsp;';
+    } else if (qr.active) {
+      box.className = 'on';
+      box.innerHTML = qr.svg;
+      $('qrHint').textContent = qr.mode === 'online'
+        ? 'Internet mode: the code changes every 15 seconds. Each phone can register one name.'
+        : 'Students can register while the QR window is open. Close that window to pause, reopen it to continue.';
+    } else {
+      box.className = '';
+      box.textContent = 'Select a subject and press "Start attendance".';
+      $('qrHint').innerHTML = '&nbsp;';
+    }
+  } catch { /* server restarting */ }
+}
+
+// ---------- second monitor ----------
+let screenDetails = null;
+let displayWin = null;
+
+function note(msg) { $('screenNote').textContent = msg; $('screenNote').hidden = !msg; }
+
+// Tells the app the teacher opened the QR; without this the QR window shows "paused".
+const allowRegistration = () => api('/api/display/open', 'POST').then(refreshQr).catch((e) => toast(e.message));
+
+async function closeQr() {
+  try {
+    await api('/api/display/closed', 'POST');
+    if (displayWin && !displayWin.closed) displayWin.close();
+    displayWin = null;
+    await refresh();
+    refreshQr();
+  } catch (err) { toast(err.message); }
+}
+
+async function sendToSecondMonitor() {
+  note('');
+  if (displayWin && !displayWin.closed) { // already on screen: just make sure registration is on
+    displayWin.focus();
+    return allowRegistration();
+  }
+  let features = 'popup,width=800,height=860';
+  let found = false;
+  try {
+    if ('getScreenDetails' in window) {
+      screenDetails = screenDetails || await window.getScreenDetails();
+      const other = screenDetails.screens.find((s) => s !== screenDetails.currentScreen);
+      if (other) {
+        found = true;
+        features = `popup,fullscreen,left=${other.availLeft},top=${other.availTop},width=${other.availWidth},height=${other.availHeight}`;
+      }
+    } else if (window.screen.isExtended) {
+      found = true; // older browser: assume the second monitor is to the right
+      features = `popup,left=${window.screen.width},top=0,width=1280,height=720`;
+    }
+  } catch {
+    note('The browser was not allowed to manage windows. Click the icon at the left of the address bar, allow "Window management", then press the button again.');
+  }
+  displayWin = window.open('/display', '_blank', features);
+  if (!displayWin) return note('The window was blocked. Press the button once more (and allow pop-ups for this page if asked).');
+  allowRegistration();
+  if (!found && $('screenNote').hidden) {
+    note('No second monitor was detected, so the QR opened in a window here. Connect the projector in "Extend" mode (Win + P) and press the button again.');
+  }
+}
+
+// ---------- events ----------
+$('subjectForm').onsubmit = run(async () => {
+  await api('/api/subjects', 'POST', { name: $('subjectName').value });
+  $('subjectName').value = '';
+});
+$('manualForm').onsubmit = run(async () => {
+  await api('/api/records', 'POST', { name: $('manualName').value });
+  $('manualName').value = '';
+});
+$('startBtn').onclick = run(async () => {
+  if (state.active && !confirm(`End the running ${state.active.subjectName} session and start a new one?`)) return;
+  await api('/api/session/start', 'POST', { subjectId: pickedSubject });
+  refreshQr();
+});
+$('endBtn').onclick = run(async () => {
+  if (!confirm('End this session? Students will no longer be able to check in.')) return;
+  await api('/api/session/end', 'POST');
+  refreshQr();
+});
+$('saveSettings').onclick = run(async () => {
+  await api('/api/settings', 'POST', {
+    mode: $('mode').value, lanIp: $('lanIp').value, wifiSsid: $('wifiSsid').value,
+    wifiPass: $('wifiPass').value, deviceLock: $('deviceLock').checked,
+  });
+  settingsLoaded = false;
+  refreshQr();
+  toast('Saved');
+});
+$('mode').onchange = drawModeNote;
+$('displayBtn').onclick = sendToSecondMonitor;
+$('closeQrBtn').onclick = closeQr;
+$('search').oninput = drawRecords;
+$('viewerSearch').oninput = drawViewer;
+$('exportAll').onclick = () => { location.href = '/api/export'; };
+$('viewerClose').onclick = () => $('viewer').close();
+
+refresh().catch((e) => toast(e.message));
+refreshQr();
+setInterval(() => refresh().catch(() => {}), 2000);
+setInterval(refreshQr, 3000);
+</script>
+</body>
+</html>

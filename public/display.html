@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attendance QR</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #fff; color: #111; font-family: "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2vh; padding: 3vh 3vw; overflow: hidden; cursor: none; }
+  h1 { margin: 0; font-size: 5vh; text-align: center; }
+  #codes { display: flex; align-items: center; justify-content: center; gap: 5vw; flex: 1; min-height: 0; width: 100%; }
+  .code { display: flex; flex-direction: column; align-items: center; gap: 1.5vh; }
+  .code svg { width: 100%; height: 100%; display: block; }
+  .code .box { width: min(76vh, 88vw); aspect-ratio: 1; }
+  .code p { margin: 0; font-size: 3vh; color: #333; text-align: center; }
+  #codes.two .box { width: min(70vh, 50vw); }
+  #codes.two #wifi .box { width: min(42vh, 30vw); }
+  [hidden] { display: none !important; }
+  #idle { font-size: 4vh; color: #777; }
+  #fs { position: fixed; bottom: 1.5vh; right: 1.5vw; font-size: 14px; color: #999; }
+</style>
+</head>
+<body>
+  <h1 id="subject" dir="auto"></h1>
+  <div id="codes" hidden>
+    <div class="code" id="wifi" hidden>
+      <div class="box" id="wifiBox"></div>
+      <p><b>1.</b> Join Wi-Fi <span id="wifiName"></span></p>
+    </div>
+    <div class="code">
+      <div class="box" id="qrBox"></div>
+      <p id="scanText">Scan to register your attendance</p>
+    </div>
+  </div>
+  <div id="idle">No attendance session is running.</div>
+  <div id="fs">Click anywhere for full screen</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let lastSvg = '';
+
+async function tick() {
+  try {
+    const qr = await (await fetch('/api/qr?display=1')).json();
+    $('codes').hidden = !qr.active;
+    $('idle').hidden = !!qr.active;
+    if (!qr.active) $('idle').textContent = 'No attendance session is running.';
+    $('subject').textContent = qr.active ? qr.subject : '';
+    if (!qr.active) return;
+    if (qr.waiting || qr.paused) {
+      $('codes').hidden = true;
+      $('idle').hidden = false;
+      $('idle').textContent = qr.waiting || 'Registration is paused.';
+      lastSvg = '';
+      $('qrBox').replaceChildren(); // no code stays on screen while paused
+      return;
+    }
+    if (qr.svg !== lastSvg) { $('qrBox').innerHTML = qr.svg; lastSvg = qr.svg; }
+    $('wifi').hidden = !qr.wifiSvg;
+    $('codes').classList.toggle('two', !!qr.wifiSvg);
+    if (qr.wifiSvg) {
+      if ($('wifiBox').dataset.for !== qr.wifiSsid) {
+        $('wifiBox').innerHTML = qr.wifiSvg;
+        $('wifiBox').dataset.for = qr.wifiSsid;
+      }
+      $('wifiName').textContent = '"' + qr.wifiSsid + '"';
+      $('scanText').innerHTML = '<b>2.</b> Scan to register your attendance';
+    } else {
+      $('scanText').textContent = 'Scan to register your attendance';
+    }
+  } catch { /* server restarting */ }
+}
+
+function checkFullscreen() {
+  const full = document.fullscreenElement || window.innerHeight >= screen.height - 4;
+  $('fs').hidden = !!full;
+}
+document.addEventListener('click', () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+});
+document.addEventListener('fullscreenchange', checkFullscreen);
+window.addEventListener('resize', checkFullscreen);
+
+// closing this window pauses registration straight away
+window.addEventListener('pagehide', () => navigator.sendBeacon('/api/display/closed'));
+
+tick();
+checkFullscreen();
+setInterval(tick, 1500);
+</script>
+</body>
+</html>

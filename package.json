@@ -1,0 +1,12 @@
+{
+  "name": "qr-attendance",
+  "version": "1.0.0",
+  "description": "Local QR code attendance for classrooms",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js --open"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
